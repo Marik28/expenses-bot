@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "expenses-bot"
+version = "0.1.0"
+description = ""
+authors = ["Mark Fitsek <markel20002000@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+SQLAlchemy = "^1.4.39"
+aiogram = "^2.21"
+alembic = "^1.8.0"
+
+[tool.poetry.dev-dependencies]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
