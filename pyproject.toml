@@ -9,6 +9,8 @@ python = "^3.10"
 SQLAlchemy = "^1.4.39"
 aiogram = "^2.21"
 alembic = "^1.8.0"
+pydantic = {extras = ["dotenv"], version = "^1.9.1"}
+psycopg2-binary = "^2.9.3"
 
 [tool.poetry.dev-dependencies]
 
