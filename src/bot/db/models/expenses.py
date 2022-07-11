@@ -14,7 +14,7 @@ from ..database import Base
 
 
 class Expense(Base):
-    __tablename__ = "income"
+    __tablename__ = "expenses"
 
     id = Column(Integer(), primary_key=True, autoincrement=True)
     date = Column(Date(), nullable=False, server_default=text("now()::date"))
