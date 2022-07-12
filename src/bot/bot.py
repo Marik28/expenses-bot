@@ -170,7 +170,7 @@ async def save_expense(query: types.CallbackQuery, state: FSMContext, callback_d
     service = ExpensesService(Session())
     async with state.proxy() as data:
         service.add(
-            amount=data["amount"],
+            amount=data["amount"] if not data["is_expense"] else -data["amount"],
             is_expense=data["is_expense"],
             user_id=query.from_user.id,
             category_id=callback_data["id"],

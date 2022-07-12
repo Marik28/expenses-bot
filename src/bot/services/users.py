@@ -26,7 +26,11 @@ class UsersService(BaseService):
                 .filter(User.id == user_id))
 
     def get_balance(self, user_id: int) -> Decimal:
-        expenses_amount = self._get_expenses(user_id, True)
-        revenues_amount = self._get_expenses(user_id, False)
-        balance = self.session.query(revenues_amount.label("revenues") - expenses_amount.label("expenses")).one()[0]
+        q = (self.session
+             .query(func.sum(Expense.amount))
+             .select_from(User)
+             .join(User.expenses)
+             .filter(User.id == user_id))
+
+        balance = q.one()[0]
         return balance
