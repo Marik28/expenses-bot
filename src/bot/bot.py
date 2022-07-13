@@ -9,6 +9,8 @@ from aiogram.dispatcher import (
     Dispatcher,
     FSMContext,
 )
+from aiogram.types import ParseMode
+from aiogram.utils.markdown import spoiler
 
 from .db.database import Session
 from .helpers import (
@@ -35,11 +37,8 @@ dp = Dispatcher(bot, storage=storage)
 
 @dp.errors_handler(exception=Exception)
 async def handle_error(update: types.Update, error: Exception):
-    if not update.message:
-        return
-
-    await bot.send_message(update.message.chat.id, f"Произошла ошибка {str(error)}")
     state = dp.current_state(chat=update.message.chat.id, user=update.message.from_user.id)
+    await bot.send_message(state.chat, f"Произошла ошибка {type(error)}")
     await state.finish()
 
 
@@ -63,7 +62,16 @@ async def greet(message: types.Message):
 @dp.message_handler(commands=["balance"])
 async def get_balance(message: types.Message):
     service = UsersService(Session())
-    await message.answer(str(service.get_balance(message.from_user.id)))
+    balance = str(service.get_balance(message.from_user.id))
+    await message.answer(spoiler(balance), parse_mode=ParseMode.MARKDOWN_V2)
+
+
+@dp.message_handler(commands=["today"])
+async def get_today_expenses(message: types.Message):
+    service = UsersService(Session())
+    date = dt.date.today()
+    expenses = service.get_daily_expenses(message.from_user.id, date)
+    await message.answer(spoiler(expenses), parse_mode=ParseMode.MARKDOWN_V2)
 
 
 @dp.message_handler(commands=["cancel"], state="*")

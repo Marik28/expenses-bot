@@ -1,3 +1,4 @@
+import datetime as dt
 from decimal import Decimal
 
 from sqlalchemy import func
@@ -34,3 +35,11 @@ class UsersService(BaseService):
 
         balance = q.one()[0]
         return balance
+
+    def get_daily_expenses(self, user_id: int, day: dt.date) -> Decimal:
+        return (self.session
+                .query(func.sum(Expense.amount))
+                .filter(Expense.is_expense.is_(True))
+                .filter(Expense.date == day)
+                .filter(Expense.user_id == user_id)
+                .one())[0]
