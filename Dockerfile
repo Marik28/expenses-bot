@@ -7,6 +7,7 @@ WORKDIR /app
 COPY pyproject.toml poetry.lock /app/
 COPY src/ /app/
 
-RUN poetry install
+RUN poetry config virtualenvs.create false \
+  && poetry install --no-interaction --no-ansi
 
 ENTRYPOINT ["poetry", "run"]
