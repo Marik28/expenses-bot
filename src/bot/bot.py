@@ -10,7 +10,10 @@ from aiogram.dispatcher import (
     FSMContext,
 )
 from aiogram.types import ParseMode
-from aiogram.utils.markdown import spoiler
+from aiogram.utils.markdown import (
+    spoiler,
+    code,
+)
 
 from .db.database import Session
 from .helpers import (
@@ -37,8 +40,10 @@ dp = Dispatcher(bot, storage=storage)
 
 @dp.errors_handler(exception=Exception)
 async def handle_error(update: types.Update, error: Exception):
-    state = dp.current_state(chat=update.message.chat.id, user=update.message.from_user.id)
-    await bot.send_message(state.chat, f"Произошла ошибка {type(error)}")
+    message = update.message or update.callback_query.message
+    state = dp.current_state(chat=message.chat.id, user=message.from_user.id)
+    error_msg = code(error.__class__.__name__)
+    await bot.send_message(state.chat, f"Произошла ошибка {error_msg}", parse_mode=ParseMode.MARKDOWN_V2)
     await state.finish()
 
 
@@ -115,20 +120,19 @@ async def process_add_expense(message: types.Message, state: FSMContext):
 
 @dp.callback_query_handler(operation_type_cb.filter())
 async def choose_operation_type(query: types.CallbackQuery, state: FSMContext, callback_data: dict):
-    await query.answer(f"Выбрано {callback_data['type']}")
+    await query.answer(f"Выбрано '{callback_data['type'].capitalize()}'")
     async with state.proxy() as data:
         data["is_expense"] = callback_data["type"] == "expense"
-    await query.message.answer(
-        "Выберите действие",
-        reply_markup=get_add_expense_options(),
-    )
+
+    await query.message.edit_text("Выберите действие:",
+                                  reply_markup=get_add_expense_options(with_save_btn=data.get("can_save", False)))
 
 
 @dp.callback_query_handler(add_expense_options_cb.filter(action="date"), state="*")
-async def add_date(query: types.CallbackQuery, state: FSMContext, callback_data: dict):
+async def edit_date(query: types.CallbackQuery, state: FSMContext, callback_data: dict):
     await query.answer("Введите дату")
     await AddExpenseStates.waiting_for_date.set()
-    await query.message.answer("Введите дату в формате 'dd.mm.yy'")
+    await query.message.edit_text("Введите дату в формате 'дд.мм.гг'", reply_markup=None)
 
 
 @dp.message_handler(state=AddExpenseStates.waiting_for_date)
@@ -136,22 +140,22 @@ async def parse_date(message: types.Message, state: FSMContext):
     try:
         date = dt.datetime.strptime(message.text, "%d.%m.%y").date()
     except ValueError:
-        await message.answer("Неверный формат")
+        await message.answer("Неверный формат даты. Ожидается 'дд.мм.гг'")
         return
-
-    await message.answer("Дата сохранена")
 
     async with state.proxy() as data:
         data["date"] = date
 
     await state.reset_state(with_data=False)
+    await message.answer("Дата сохранена. Выберите действие",
+                         reply_markup=get_add_expense_options(with_save_btn=data.get("can_save", False)))
 
 
 @dp.callback_query_handler(add_expense_options_cb.filter(action="comment"), state="*")
-async def add_comment(query: types.CallbackQuery, state: FSMContext, callback_data: dict):
+async def edit_comment(query: types.CallbackQuery, state: FSMContext, callback_data: dict):
     await query.answer("Введите текст комментария")
     await AddExpenseStates.waiting_for_comment.set()
-    await query.message.answer("Введите текст комментария")
+    await query.message.edit_text("Введите текст комментария", reply_markup=None)
 
 
 @dp.message_handler(state=AddExpenseStates.waiting_for_comment)
@@ -159,31 +163,46 @@ async def parse_comment(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         data["comment"] = message.text
 
-    await message.answer("Комментарий сохранен")
     await state.reset_state(with_data=False)
+    await message.answer("Комментарий сохранен. Выберите действие",
+                         reply_markup=get_add_expense_options(with_save_btn=data.get("can_save", False)))
 
 
 @dp.callback_query_handler(add_expense_options_cb.filter(action="category"), state="*")
 async def show_categories(query: types.CallbackQuery, state: FSMContext, callback_data: dict):
     service = CategoriesService(Session())
     await query.answer("Выберите категорию")
-    await query.message.answer("Выберите категорию",
-                               reply_markup=get_categories_buttons(service))
+    await query.message.edit_text("Выберите категорию",
+                                  reply_markup=get_categories_buttons(service))
     await state.reset_state(with_data=False)
 
 
 @dp.callback_query_handler(categories_cb.filter(), state="*")
-async def save_expense(query: types.CallbackQuery, state: FSMContext, callback_data: dict):
+async def add_category(query: types.CallbackQuery, state: FSMContext, callback_data: dict):
     await query.answer("Категория выбрана")
+    async with state.proxy() as data:
+        data["category_id"] = callback_data["id"]
+        data["can_save"] = True
+
+    await query.message.edit_text("Категория сохранена. Выберите действие:",
+                                  # FIXME: повторяется везде
+                                  reply_markup=get_add_expense_options(with_save_btn=data.get("can_save", False)))
+
+
+# TODO: нельзя параллельно сохранять несколько записей
+@dp.callback_query_handler(add_expense_options_cb.filter(action="save"), state="*")
+async def save_expense(query: types.CallbackQuery, state: FSMContext, callback_data: dict):
     service = ExpensesService(Session())
     async with state.proxy() as data:
         service.add(
             amount=data["amount"] if not data["is_expense"] else -data["amount"],
             is_expense=data["is_expense"],
             user_id=query.from_user.id,
-            category_id=callback_data["id"],
+            category_id=data["category_id"],
             comment=data.get("comment"),
             date=data.get("date"),
         )
-    await query.message.answer("Данные сохранены")
+
+    await query.answer("Данные сохранены!")
+    await query.message.edit_text("Данные сохранены!", reply_markup=None)
     await state.finish()

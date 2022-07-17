@@ -33,20 +33,15 @@ def get_operation_types() -> InlineKeyboardMarkup:
     return keyboard
 
 
-def get_add_expense_options() -> InlineKeyboardMarkup:
-    keyboard = InlineKeyboardMarkup()
-    keyboard.row(
-        InlineKeyboardButton(
-            "Добавить комментарий",
-            callback_data=add_expense_options_cb.new(action="comment"),
-        ),
-        InlineKeyboardButton(
-            "Добавить дату",
-            callback_data=add_expense_options_cb.new(action="date"),
-        ),
-        InlineKeyboardButton(
-            "Выбрать категорию",
-            callback_data=add_expense_options_cb.new(action="category"),
-        ),
-    )
+def get_add_expense_options(*, with_save_btn: bool = False) -> InlineKeyboardMarkup:
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    options = [("Изменить комментарий", "comment"),
+               ("Изменить дату", "date"),
+               ("Выбрать категорию", "category")]
+    for text, action in options:
+        keyboard.insert(InlineKeyboardButton(text, callback_data=add_expense_options_cb.new(action=action)))
+
+    if with_save_btn:
+        keyboard.insert(InlineKeyboardButton("Сохранить", callback_data=add_expense_options_cb.new(action="save")))
+
     return keyboard
