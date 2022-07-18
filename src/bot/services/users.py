@@ -18,6 +18,9 @@ class UsersService(BaseService):
         user.username = username
         self._save(user)
 
+    def _get(self, user_id: int) -> User | None:
+        return self.session.query(User).filter(User.id == user_id).first()
+
     def _get_expenses(self, user_id: int, expenses: bool) -> Query:
         return (self.session
                 .query(func.sum(Expense.amount))
@@ -27,14 +30,7 @@ class UsersService(BaseService):
                 .filter(User.id == user_id))
 
     def get_balance(self, user_id: int) -> Decimal:
-        q = (self.session
-             .query(func.sum(Expense.amount))
-             .select_from(User)
-             .join(User.expenses)
-             .filter(User.id == user_id))
-
-        balance = q.one()[0]
-        return balance
+        return self._get(user_id).balance
 
     def get_daily_expenses(self, user_id: int, day: dt.date) -> Decimal:
         return (self.session
