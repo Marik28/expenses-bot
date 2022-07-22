@@ -2,13 +2,13 @@ import datetime as dt
 from decimal import Decimal
 
 from sqlalchemy import func
-from sqlalchemy.orm import Query
 
 from .base import BaseService
 from ..db.models import (
     User,
     Expense,
 )
+from ..settings import settings
 
 
 class UsersService(BaseService):
@@ -21,14 +21,6 @@ class UsersService(BaseService):
     def _get(self, user_id: int) -> User | None:
         return self.session.query(User).filter(User.id == user_id).first()
 
-    def _get_expenses(self, user_id: int, expenses: bool) -> Query:
-        return (self.session
-                .query(func.sum(Expense.amount))
-                .select_from(User)
-                .join(User.expenses)
-                .filter(Expense.is_expense.is_(expenses))
-                .filter(User.id == user_id))
-
     def get_balance(self, user_id: int) -> Decimal:
         return self._get(user_id).balance
 
@@ -38,4 +30,5 @@ class UsersService(BaseService):
                 .filter(Expense.is_expense.is_(True))
                 .filter(Expense.date == day)
                 .filter(Expense.user_id == user_id)
-                .one())[0]
+                .filter(Expense.category_id.not_in(settings.exclude_categories))  # долги не считаем
+                .one())[0] or Decimal('0.0')

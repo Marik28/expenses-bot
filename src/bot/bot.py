@@ -14,6 +14,10 @@ from aiogram.utils.markdown import (
     spoiler,
     code,
 )
+from aiogram_calendar import (
+    SimpleCalendar,
+    simple_cal_callback,
+)
 
 from .db.database import Session
 from .helpers import (
@@ -131,24 +135,26 @@ async def choose_operation_type(query: types.CallbackQuery, state: FSMContext, c
 @dp.callback_query_handler(add_expense_options_cb.filter(action="date"), state="*")
 async def edit_date(query: types.CallbackQuery, state: FSMContext, callback_data: dict):
     await query.answer("Введите дату")
-    await AddExpenseStates.waiting_for_date.set()
-    await query.message.edit_text("Введите дату в формате 'дд.мм.гг'", reply_markup=None)
+    await query.message.edit_text("Введите дату в формате 'дд.мм.гг'",
+                                  reply_markup=await SimpleCalendar().start_calendar())
 
 
-@dp.message_handler(state=AddExpenseStates.waiting_for_date)
-async def parse_date(message: types.Message, state: FSMContext):
-    try:
-        date = dt.datetime.strptime(message.text, "%d.%m.%y").date()
-    except ValueError:
-        await message.answer("Неверный формат даты. Ожидается 'дд.мм.гг'")
+# simple calendar usage
+@dp.callback_query_handler(simple_cal_callback.filter())
+async def process_date_selection(query: types.CallbackQuery, state: FSMContext, callback_data: dict):
+    selected, date = await SimpleCalendar().process_selection(query, callback_data)
+
+    if not selected:
         return
 
     async with state.proxy() as data:
         data["date"] = date
 
-    await state.reset_state(with_data=False)
-    await message.answer("Дата сохранена. Выберите действие",
-                         reply_markup=get_add_expense_options(with_save_btn=data.get("can_save", False)))
+    await query.answer("Дата сохранена.")
+    await query.message.edit_text(
+        f'Дата сохранена. Выберите действие:',
+        reply_markup=get_add_expense_options(with_save_btn=data.get("can_save", False))
+    )
 
 
 @dp.callback_query_handler(add_expense_options_cb.filter(action="comment"), state="*")

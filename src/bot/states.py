@@ -10,4 +10,3 @@ class AddCategoryStates(StatesGroup):
 
 class AddExpenseStates(StatesGroup):
     waiting_for_comment = State()
-    waiting_for_date = State()
