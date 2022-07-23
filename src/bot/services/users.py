@@ -24,7 +24,7 @@ class UsersService(BaseService):
     def get_balance(self, user_id: int) -> Decimal:
         return self._get(user_id).balance
 
-    def get_daily_expenses(self, user_id: int, day: dt.date) -> Decimal:
+    def get_total_daily_expenses(self, user_id: int, day: dt.date) -> Decimal:
         return (self.session
                 .query(func.sum(Expense.amount))
                 .filter(Expense.is_expense.is_(True))

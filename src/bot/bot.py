@@ -18,6 +18,7 @@ from aiogram_calendar import (
     SimpleCalendar,
     simple_cal_callback,
 )
+from dateutil import parser
 
 from .db.database import Session
 from .helpers import (
@@ -34,7 +35,7 @@ from .services.users import UsersService
 from .settings import settings
 from .states import (
     AddCategoryStates,
-    AddExpenseStates,
+    AddExpenseStates, GetDailyStatistics,
 )
 
 bot = Bot(settings.telegram_token)
@@ -76,11 +77,39 @@ async def get_balance(message: types.Message):
 
 
 @dp.message_handler(commands=["today"])
-async def get_today_expenses(message: types.Message):
+async def get_today_total_expenses(message: types.Message):
     service = UsersService(Session())
     date = dt.date.today()
-    expenses = service.get_daily_expenses(message.from_user.id, date)
-    await message.answer(spoiler(expenses), parse_mode=ParseMode.MARKDOWN_V2)
+    total = service.get_total_daily_expenses(message.from_user.id, date)
+    await message.answer(spoiler(total), parse_mode=ParseMode.MARKDOWN_V2)
+
+
+@dp.message_handler(commands=["day"])
+async def kek(message: types.Message):
+    await message.answer("Введите дату, за которую хотите узнать статистику")
+    await GetDailyStatistics.waiting_for_date.set()
+
+
+# TODO: придумать, как применить красивый календарь
+@dp.message_handler(state=GetDailyStatistics.waiting_for_date)
+async def get_daily_statistics(message: types.Message, state: FSMContext):
+    try:
+        date = parser.parse(message.text, dayfirst=True)
+    except ValueError:
+        await message.answer("Не удалось распарсить дату")
+        return
+
+    await state.reset_state(with_data=False)
+
+    service = ExpensesService(Session())
+    stats = service.get_daily_statistics(message.from_user.id, date)
+
+    if stats is None:
+        await message.answer(f"Нет статистики за {date.strftime('%d-%m-%y')}")
+        return
+
+    await message.answer(code(stats.details), parse_mode=ParseMode.MARKDOWN_V2)
+    await bot.send_media_group(message.from_user.id, stats.charts)
 
 
 @dp.message_handler(commands=["cancel"], state="*")
@@ -134,8 +163,8 @@ async def choose_operation_type(query: types.CallbackQuery, state: FSMContext, c
 
 @dp.callback_query_handler(add_expense_options_cb.filter(action="date"), state="*")
 async def edit_date(query: types.CallbackQuery, state: FSMContext, callback_data: dict):
-    await query.answer("Введите дату")
-    await query.message.edit_text("Введите дату в формате 'дд.мм.гг'",
+    await query.answer("Выберите дату")
+    await query.message.edit_text("Выберите дату:",
                                   reply_markup=await SimpleCalendar().start_calendar())
 
 

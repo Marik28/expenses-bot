@@ -10,3 +10,7 @@ class AddCategoryStates(StatesGroup):
 
 class AddExpenseStates(StatesGroup):
     waiting_for_comment = State()
+
+
+class GetDailyStatistics(StatesGroup):
+    waiting_for_date = State()
