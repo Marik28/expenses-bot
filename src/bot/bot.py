@@ -35,7 +35,7 @@ from .services.users import UsersService
 from .settings import settings
 from .states import (
     AddCategoryStates,
-    AddExpenseStates, GetDailyStatistics,
+    AddExpenseStates, GetDailyStatistics, GetPeriodStatistics,
 )
 
 bot = Bot(settings.telegram_token)
@@ -85,7 +85,7 @@ async def get_today_total_expenses(message: types.Message):
 
 
 @dp.message_handler(commands=["day"])
-async def kek(message: types.Message):
+async def choose_date(message: types.Message):
     await message.answer("Введите дату, за которую хотите узнать статистику")
     await GetDailyStatistics.waiting_for_date.set()
 
@@ -100,6 +100,7 @@ async def get_daily_statistics(message: types.Message, state: FSMContext):
         return
 
     await state.reset_state(with_data=False)
+    await bot.send_chat_action(message.chat.id, "typing")
 
     service = ExpensesService(Session())
     stats = service.get_daily_statistics(message.from_user.id, date)
@@ -109,7 +110,52 @@ async def get_daily_statistics(message: types.Message, state: FSMContext):
         return
 
     await message.answer(code(stats.details), parse_mode=ParseMode.MARKDOWN_V2)
-    await bot.send_media_group(message.from_user.id, stats.charts)
+    await bot.send_chat_action(message.chat.id, "upload_photo")
+    await bot.send_media_group(message.chat.id, stats.charts)
+
+
+@dp.message_handler(commands=["period"])
+async def init_dates_entering(message: types.Message):
+    await GetPeriodStatistics.waiting_for_date_from.set()
+    await message.answer("С какого дня?")
+
+
+@dp.message_handler(state=GetPeriodStatistics.waiting_for_date_from)
+async def parse_date_from(message: types.Message, state: FSMContext):
+    try:
+        date_from = parser.parse(message.text, dayfirst=True)
+    except ValueError:
+        await message.answer("Не удалось распарсить дату")
+        return
+
+    async with state.proxy() as data:
+        data["date_from"] = date_from
+
+    await GetPeriodStatistics.waiting_for_date_to.set()
+    await message.answer("До какого дня?")
+
+
+@dp.message_handler(state=GetPeriodStatistics.waiting_for_date_to)
+async def parse_date_to(message: types.Message, state: FSMContext):
+    try:
+        date_to = parser.parse(message.text, dayfirst=True)
+    except ValueError:
+        await message.answer("Не удалось распарсить дату")
+        return
+
+    async with state.proxy() as data:
+        date_from = data["date_from"]
+
+    await state.reset_state(with_data=False)
+    await bot.send_chat_action(message.chat.id, "upload_photo")
+    service = ExpensesService(Session())
+    stats = service.get_period_statistics(message.from_user.id, date_from, date_to)
+
+    if stats is None:
+        await message.answer("За данный период статистика не найдена")
+        return
+
+    await bot.send_media_group(message.chat.id, stats.charts)
 
 
 @dp.message_handler(commands=["cancel"], state="*")

@@ -20,7 +20,10 @@ from ..db.models import (
     Expense,
     Category,
 )
-from ..models.expenses import DailyStatistics
+from ..models.expenses import (
+    DailyStatistics,
+    PeriodStatistics,
+)
 from ..settings import settings
 
 
@@ -73,7 +76,7 @@ class ExpensesService(BaseService):
         df.rename(columns={"name": "category"}, inplace=True)
         df = df.sort_values(by=["amount"], ascending=False)
         df = df[["amount", "category", "comment"]]
-        df.index = range(len(df))
+        df.index = range(1, len(df) + 1)
 
         agg_df = df.groupby("category").sum()
         agg_df = agg_df.sort_values(by="amount", ascending=False)
@@ -84,3 +87,38 @@ class ExpensesService(BaseService):
         df.loc["Total"] = df.sum(numeric_only=True)
         df.fillna("-", inplace=True)
         return DailyStatistics(details=df.to_string(), aggregated=agg_df.to_string(), charts=MediaGroup([pie, bar]))
+
+    def get_period_statistics(self, user_id: int, date_from: dt.date, date_to: dt.date) -> PeriodStatistics | None:
+        query = (self.session.query(Expense, Category)
+                 .options(Load(Expense).load_only("id", "date", "amount", "comment"),
+                          Load(Category).defer("id").load_only("name"))
+                 .join(Category)
+                 .filter(Expense.date.between(date_from, date_to))
+                 .filter(Expense.is_expense.is_(True))
+                 .filter(Expense.user_id == user_id)
+                 .filter(Category.id.not_in(settings.exclude_categories)))
+
+        df = pd.read_sql(query.statement, query.session.bind, index_col="id")
+
+        if df.empty:
+            return None
+
+        df.rename(columns={"name": "category"}, inplace=True)
+        df["amount"] = -df["amount"]
+        df = df[["date", "amount", "category", "comment"]]
+        df.sort_values(by=["date", "amount"], ascending=[True, False], inplace=True)
+        df.index = range(1, len(df) + 1)
+
+        top_ten_expenses_df = df.sort_values(by=["amount"], ascending=False).head(10)
+
+        daily_df = df.groupby(by="date").sum(numeric_only=True)
+
+        cat_df = df.groupby(by="category").sum(numeric_only=True)
+        cat_pie = self._make_plot(cat_df, "pie", y="amount")
+
+        agg_df = df.groupby(by=["date", "category"]).sum()
+        bar = self._make_plot(agg_df.unstack(), "bar", stacked=True)
+
+        return PeriodStatistics(top_ten=top_ten_expenses_df.to_string(index=False),
+                                daily=daily_df.to_string(index=False),
+                                charts=MediaGroup([cat_pie, bar]))

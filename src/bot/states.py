@@ -14,3 +14,8 @@ class AddExpenseStates(StatesGroup):
 
 class GetDailyStatistics(StatesGroup):
     waiting_for_date = State()
+
+
+class GetPeriodStatistics(StatesGroup):
+    waiting_for_date_from = State()
+    waiting_for_date_to = State()
