@@ -17,8 +17,6 @@ services:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_DB=${POSTGRES_DB}
       - TZ=Asia/Almaty
-    ports:
-      - ${POSTGRES_PORT}:5432
 
   bot:
     build: .
