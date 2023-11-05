@@ -27,4 +27,6 @@ services:
     env_file: .env
     environment:
       - TZ=Asia/Almaty
+    volumes:
+      - .:/app
     command: python -m bot

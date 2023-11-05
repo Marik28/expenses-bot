@@ -1,5 +1,4 @@
 import datetime as dt
-from decimal import Decimal
 
 import sqlalchemy.exc
 from aiogram import types
