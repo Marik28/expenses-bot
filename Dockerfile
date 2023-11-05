@@ -1,6 +1,6 @@
 FROM python:3.10
 
-RUN pip install -U pip setuptools && pip install --ignore-installed poetry
+RUN pip install -U pip setuptools && pip install --ignore-installed poetry==1.2
 
 WORKDIR /app
 
