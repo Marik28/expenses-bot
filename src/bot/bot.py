@@ -1,5 +1,4 @@
 import datetime as dt
-from decimal import Decimal
 
 import sqlalchemy.exc
 from aiogram import types
@@ -37,6 +36,7 @@ from .states import (
     AddCategoryStates,
     AddExpenseStates, GetDailyStatistics, GetPeriodStatistics,
 )
+from .utils.parsing import EXPENSE_REGEX, parse_expense
 
 bot = Bot(settings.telegram_token)
 storage = MemoryStorage()
@@ -186,11 +186,15 @@ async def add_category(message: types.Message, state: FSMContext):
         await state.reset_state(with_data=False)
 
 
-@dp.message_handler(regexp=r"^\d{1,10}([,|.]\d*)?$")
+@dp.message_handler(regexp=EXPENSE_REGEX)
 async def process_add_expense(message: types.Message, state: FSMContext):
-    amount = Decimal(message.text.replace(",", "."))
+    amount, comment = parse_expense(message.text)
+
     async with state.proxy() as data:
         data["amount"] = abs(amount)
+        if comment is not None:
+            data["comment"] = comment
+
     await message.answer(
         "Доход или расход?",
         reply_markup=get_operation_types(),
