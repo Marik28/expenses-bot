@@ -1,4 +1,5 @@
 import datetime as dt
+from zoneinfo import ZoneInfo
 
 import sqlalchemy.exc
 from aiogram import types
@@ -213,9 +214,13 @@ async def choose_operation_type(query: types.CallbackQuery, state: FSMContext, c
 
 @dp.callback_query_handler(add_expense_options_cb.filter(action="date"), state="*")
 async def edit_date(query: types.CallbackQuery, state: FSMContext, callback_data: dict):
+    now = dt.datetime.now(ZoneInfo("Asia/Almaty"))
     await query.answer("Выберите дату")
     await query.message.edit_text("Выберите дату:",
-                                  reply_markup=await SimpleCalendar().start_calendar())
+                                  reply_markup=await SimpleCalendar().start_calendar(
+                                      year=now.year,
+                                      month=now.month,
+                                  ))
 
 
 # simple calendar usage
