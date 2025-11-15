@@ -10,10 +10,7 @@ from aiogram.dispatcher import (
     FSMContext,
 )
 from aiogram.types import ParseMode
-from aiogram.utils.markdown import (
-    spoiler,
-    code,
-)
+from aiogram.utils.markdown import (code, spoiler)
 from aiogram_calendar import (
     SimpleCalendar,
     simple_cal_callback,
@@ -21,14 +18,8 @@ from aiogram_calendar import (
 from dateutil import parser
 
 from .db.database import Session
-from .helpers import (
-    get_add_expense_options,
-    add_expense_options_cb,
-    get_categories_buttons,
-    categories_cb,
-    operation_type_cb,
-    get_operation_types,
-)
+from .helpers import (add_expense_options_cb, categories_cb, get_add_expense_options, get_categories_buttons,
+                      get_operation_types, operation_type_cb)
 from .services.categories import CategoriesService
 from .services.expenses import ExpensesService
 from .services.users import UsersService
@@ -192,6 +183,7 @@ async def process_add_expense(message: types.Message, state: FSMContext):
     amount, comment = parse_expense(message.text)
 
     async with state.proxy() as data:
+        data["message_id"] = message.message_id
         data["amount"] = abs(amount)
         if comment is not None:
             data["comment"] = comment
@@ -245,6 +237,9 @@ async def process_date_selection(query: types.CallbackQuery, state: FSMContext, 
 async def edit_comment(query: types.CallbackQuery, state: FSMContext, callback_data: dict):
     await query.answer("Введите текст комментария")
     await AddExpenseStates.waiting_for_comment.set()
+    async with state.proxy() as data:
+        data["enter_comment_message_id"] = query.message.message_id
+
     await query.message.edit_text("Введите текст комментария", reply_markup=None)
 
 
@@ -254,8 +249,17 @@ async def parse_comment(message: types.Message, state: FSMContext):
         data["comment"] = message.text
 
     await state.reset_state(with_data=False)
-    await message.answer("Комментарий сохранен. Выберите действие",
-                         reply_markup=get_add_expense_options(with_save_btn=data.get("can_save", False)))
+    async with state.proxy() as data:
+        message_id = data["enter_comment_message_id"]
+        del data["enter_comment_message_id"]
+
+    await bot.edit_message_text(
+        "Комментарий сохранен. Выберите действие",
+        chat_id=message.chat.id,
+        message_id=message_id,
+        reply_markup=get_add_expense_options(with_save_btn=data.get("can_save", False))
+    )
+    await message.delete()
 
 
 @dp.callback_query_handler(add_expense_options_cb.filter(action="category"), state="*")
@@ -284,7 +288,9 @@ async def add_category(query: types.CallbackQuery, state: FSMContext, callback_d
 async def save_expense(query: types.CallbackQuery, state: FSMContext, callback_data: dict):
     service = ExpensesService(Session())
     async with state.proxy() as data:
-        service.add(
+        message_to_delete = data["message_id"]
+
+        expense = service.add(
             amount=data["amount"] if not data["is_expense"] else -data["amount"],
             is_expense=data["is_expense"],
             user_id=query.from_user.id,
@@ -294,5 +300,15 @@ async def save_expense(query: types.CallbackQuery, state: FSMContext, callback_d
         )
 
     await query.answer("Данные сохранены!")
-    await query.message.edit_text("Данные сохранены!", reply_markup=None)
+    await bot.delete_message(query.message.chat.id, message_to_delete)
+    msg_bits = [
+        f"{'📉Расход' if expense.is_expense else '📈Доход'}: {abs(expense.amount)}",
+        f"☕Категория: {expense.category.name}{' ' + expense.category.emoji if expense.category.emoji else ''}",
+        f"📅Дата: {expense.date.isoformat()}",
+    ]
+
+    if expense.comment:
+        msg_bits.append(f"🗒Комментарий: {expense.comment}")
+
+    await query.message.edit_text("\n".join(msg_bits), reply_markup=None)
     await state.finish()

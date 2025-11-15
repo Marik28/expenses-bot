@@ -28,13 +28,15 @@ from ..settings import settings
 
 
 class ExpensesService(BaseService):
-    def add(self,
+    def add(
+            self,
             amount: Decimal,
             is_expense: bool,
             user_id: int,
             category_id: int,
             comment: str = None,
-            date: dt.date = None):
+            date: dt.date = None
+    ) -> Expense:
         expense = Expense()
         expense.amount = amount
         expense.is_expense = is_expense
@@ -43,6 +45,7 @@ class ExpensesService(BaseService):
         expense.category_id = category_id
         expense.comment = comment
         self._save(expense)
+        return expense
 
     def _get_daily_stats_query(self, user_id: int, day: dt.date) -> Query:
         return (self.session.query(Expense, Category)

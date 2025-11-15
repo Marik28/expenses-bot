@@ -9,6 +9,7 @@ from sqlalchemy import (
     Boolean,
     BigInteger,
 )
+from sqlalchemy.orm import relationship
 
 from ..database import Base
 
@@ -23,3 +24,5 @@ class Expense(Base):
     comment = Column(String(255), nullable=True, index=True)
     category_id = Column(Integer(), ForeignKey("categories.id"), nullable=False)
     user_id = Column(BigInteger(), ForeignKey("users.id"), nullable=False)
+
+    category = relationship("Category")
