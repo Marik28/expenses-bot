@@ -1,13 +1,15 @@
 FROM python:3.10
 
-RUN pip install -U pip setuptools && pip install --ignore-installed poetry==1.2
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates
+ADD https://astral.sh/uv/install.sh /uv-installer.sh
+RUN sh /uv-installer.sh && rm /uv-installer.sh
+ENV PATH="/root/.local/bin/:$PATH"
 
 WORKDIR /app
 
-COPY pyproject.toml poetry.lock /app/
+COPY pyproject.toml /app/
 COPY src/ /app/
 
-RUN poetry config virtualenvs.create false \
-  && poetry install --no-interaction --no-ansi
+RUN uv sync --no-dev
 
-ENTRYPOINT ["poetry", "run"]
+ENTRYPOINT ["uv", "run"]

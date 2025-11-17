@@ -1,8 +1,10 @@
 import logging
 
+import dotenv
 from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from aiogram.utils import executor
 
+dotenv.load_dotenv()
 from .bot import dp
 from .middlewares.auth import AuthMiddleware
 
