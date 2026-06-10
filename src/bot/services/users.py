@@ -12,6 +12,9 @@ from ..settings import settings
 
 
 class UsersService(BaseService):
+    def get_all_users(self) -> list[int]:
+        return [user.id for user in self.session.query(User).all()]
+
     def create(self, user_id: int, username: str | None):
         user = User()
         user.id = user_id
