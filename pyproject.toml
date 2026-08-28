@@ -20,6 +20,10 @@ dependencies = [
     "pydantic-settings>=2.12.0",
     "numpy~=1.23.1",
     "apscheduler>=3.11.2",
+    "httpx>=0.28.1",
+    "xmltodict>=1.0.4",
+    "hishel[redis]>=1.3.1",
+    "redis>=8.1.0",
 ]
 
 [dependency-groups]

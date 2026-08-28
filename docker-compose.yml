@@ -2,6 +2,7 @@ volumes:
   db:
   logs:
   bot:
+  redis:
 
 services:
 
@@ -18,11 +19,21 @@ services:
     ports:
       - ${POSTGRES_PORT}:5432
 
+  redis:
+    image: redis:7-alpine
+    restart: always
+    volumes:
+      - redis:/data
+    ports:
+      - ${REDIS_PORT}:6379
+
   bot:
     build: .
     depends_on:
       - db
+      - redis
     env_file: .env
     environment:
       - TZ=Asia/Almaty
+      - REDIS_URL=redis://redis:6379/0
     command: python -m bot

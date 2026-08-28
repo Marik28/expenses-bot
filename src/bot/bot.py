@@ -1,6 +1,3 @@
-import datetime as dt
-from zoneinfo import ZoneInfo
-
 import sqlalchemy.exc
 from aiogram import types
 from aiogram.bot import Bot
@@ -18,9 +15,12 @@ from aiogram_calendar import (
 from dateutil import parser
 
 from .db.database import Session
-from .helpers import (add_expense_options_cb, categories_cb, get_add_expense_options, get_categories_buttons,
-                      get_operation_types, operation_type_cb)
+from .helpers import (
+    add_expense_options_cb, categories_cb, get_add_expense_options, get_categories_buttons,
+    get_operation_types, operation_type_cb,
+)
 from .services.categories import CategoriesService
+from .services.currency import CurrencyConverter
 from .services.expenses import ExpensesService
 from .services.users import UsersService
 from .settings import settings
@@ -28,11 +28,13 @@ from .states import (
     AddCategoryStates,
     AddExpenseStates, GetDailyStatistics, GetPeriodStatistics,
 )
-from .utils.parsing import EXPENSE_REGEX, parse_expense
+from .utils.datetime import localnow
+from .utils.parsing import BASE_CURRENCY, EXPENSE_REGEX, parse_expense
 
 bot = Bot(settings.telegram_token)
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
+converter = CurrencyConverter()
 
 
 @dp.errors_handler(exception=Exception)
@@ -71,7 +73,7 @@ async def get_balance(message: types.Message):
 @dp.message_handler(commands=["today"])
 async def get_today_total_expenses(message: types.Message):
     service = UsersService(Session())
-    date = dt.date.today()
+    date = localnow().date()
     total = service.get_total_daily_expenses(message.from_user.id, date)
     await message.answer(spoiler(total), parse_mode=ParseMode.MARKDOWN_V2)
 
@@ -180,16 +182,27 @@ async def add_category(message: types.Message, state: FSMContext):
 
 @dp.message_handler(regexp=EXPENSE_REGEX)
 async def process_add_expense(message: types.Message, state: FSMContext):
-    amount, comment = parse_expense(message.text)
+    parsed = parse_expense(message.text)
 
     async with state.proxy() as data:
         data["message_id"] = message.message_id
-        data["amount"] = abs(amount)
-        if comment is not None:
-            data["comment"] = comment
+        data["original_amount"] = abs(parsed.amount)
+        data["currency"] = parsed.currency
+        data["comment"] = parsed.comment
+        conversion = await converter.convert(parsed.amount, parsed.currency)
+        data["amount"] = conversion.amount
+        data["rate"] = conversion.rate
+
+    msg_bits = ["Доход или расход?"]
+    if not parsed.is_kzt:
+        msg_bits.insert(
+            0,
+            (f"💱 {abs(parsed.amount)} {parsed.currency} ≈ {conversion.amount} {BASE_CURRENCY} "
+             f"(курс {conversion.rate})\n")
+        )
 
     await message.answer(
-        "Доход или расход?",
+        "\n".join(msg_bits),
         reply_markup=get_operation_types(),
     )
 
@@ -206,7 +219,7 @@ async def choose_operation_type(query: types.CallbackQuery, state: FSMContext, c
 
 @dp.callback_query_handler(add_expense_options_cb.filter(action="date"), state="*")
 async def edit_date(query: types.CallbackQuery, state: FSMContext, callback_data: dict):
-    now = dt.datetime.now(ZoneInfo("Asia/Almaty"))
+    now = localnow()
     await query.answer("Выберите дату")
     await query.message.edit_text("Выберите дату:",
                                   reply_markup=await SimpleCalendar().start_calendar(
@@ -225,10 +238,24 @@ async def process_date_selection(query: types.CallbackQuery, state: FSMContext, 
 
     async with state.proxy() as data:
         data["date"] = date
+        # Дата расхода изменилась — пересчитываем сумму по курсу на эту дату.
+        conversion = await converter.convert(data["original_amount"], data["currency"], on_date=date)
+        data["amount"] = conversion.amount
+        data["rate"] = conversion.rate
+        currency = data["currency"]
+        original_amount = data["original_amount"]
+
+    msg_bits = ["Дата сохранена. Выберите действие:"]
+    if currency != BASE_CURRENCY:
+        msg_bits.insert(
+            0,
+            (f"💱 {original_amount} {currency} ≈ {conversion.amount} {BASE_CURRENCY} "
+             f"(курс {conversion.rate})\n")
+        )
 
     await query.answer("Дата сохранена.")
     await query.message.edit_text(
-        f'Дата сохранена. Выберите действие:',
+        "\n".join(msg_bits),
         reply_markup=get_add_expense_options(with_save_btn=data.get("can_save", False))
     )
 
@@ -289,6 +316,9 @@ async def save_expense(query: types.CallbackQuery, state: FSMContext, callback_d
     service = ExpensesService(Session())
     async with state.proxy() as data:
         message_to_delete = data["message_id"]
+        currency = data["currency"]
+        original_amount = data["original_amount"]
+        rate = data["rate"]
 
         expense = service.add(
             amount=data["amount"] if not data["is_expense"] else -data["amount"],
@@ -306,6 +336,9 @@ async def save_expense(query: types.CallbackQuery, state: FSMContext, callback_d
         f"☕Категория: {expense.category.name}{' ' + expense.category.emoji if expense.category.emoji else ''}",
         f"📅Дата: {expense.date.isoformat()}",
     ]
+
+    if currency != BASE_CURRENCY:
+        msg_bits.insert(1, f"💱Исходно: {original_amount} {currency} (курс {rate} {BASE_CURRENCY})")
 
     if expense.comment:
         msg_bits.append(f"🗒Комментарий: {expense.comment}")

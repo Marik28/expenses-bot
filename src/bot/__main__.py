@@ -5,7 +5,7 @@ from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from aiogram.utils import executor
 
 dotenv.load_dotenv()
-from .bot import bot, dp
+from .bot import bot, converter, dp
 from .middlewares.auth import AuthMiddleware
 from .scheduler import build_scheduler
 
@@ -25,6 +25,7 @@ async def on_startup(dp):
 
 async def on_shutdown(dp):
     scheduler.shutdown(wait=False)
+    await converter.aclose()
     logger.info("Scheduler stopped")
 
 

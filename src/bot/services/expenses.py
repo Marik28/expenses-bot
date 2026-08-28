@@ -25,6 +25,7 @@ from ..models.expenses import (
     PeriodStatistics,
 )
 from ..settings import settings
+from ..utils.datetime import localnow
 
 
 class ExpensesService(BaseService):
@@ -40,7 +41,7 @@ class ExpensesService(BaseService):
         expense = Expense()
         expense.amount = amount
         expense.is_expense = is_expense
-        expense.date = date if date is not None else dt.date.today()
+        expense.date = date if date is not None else localnow().date()
         expense.user_id = user_id
         expense.category_id = category_id
         expense.comment = comment

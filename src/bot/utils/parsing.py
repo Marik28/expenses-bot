@@ -1,13 +1,34 @@
+import dataclasses
+import re
 from decimal import Decimal
 
-EXPENSE_REGEX = r"^(?P<amount>\d{1,10}([,|.]\d*)?)\s*(?P<comment>.+)?$"
+BASE_CURRENCY = "KZT"
+
+EXPENSE_REGEX = re.compile(
+    r"^(?P<amount>\d{1,10}([,|.]\d*)?)"
+    r"(?P<cur>[A-Za-z]{3}(?=\s|$))?"
+    r"\s*(?P<comment>\S.*?)?\s*$"
+)
 
 
-def parse_expense(msg_text: str) -> tuple[Decimal, str | None]:
-    amount, _, comment = msg_text.partition(" ")
-    comment = comment.strip()
+@dataclasses.dataclass(frozen=True)
+class ParsedExpense:
+    amount: Decimal
+    currency: str
+    comment: str | None
 
-    if not comment:
-        comment = None
+    @property
+    def is_kzt(self) -> bool:
+        return self.currency == BASE_CURRENCY
 
-    return Decimal(amount.replace(",", ".")), comment
+
+def parse_expense(msg_text: str) -> ParsedExpense:
+    """Разбирает сообщение «[КОД]сумма[КОД] [комментарий]»."""
+    match = EXPENSE_REGEX.match(msg_text)
+    if match is None:
+        raise ValueError(f"Не удалось распарсить расход: {msg_text!r}")
+
+    amount = Decimal(match["amount"].replace(",", "."))
+    currency = (match["cur"] or BASE_CURRENCY).upper()
+    comment = (match["comment"] or "").strip() or None
+    return ParsedExpense(amount=amount, currency=currency, comment=comment)
