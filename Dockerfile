@@ -7,9 +7,9 @@ ENV PATH="/root/.local/bin/:$PATH"
 
 WORKDIR /app
 
-COPY pyproject.toml /app/
-COPY src/ /app/
+COPY pyproject.toml uv.lock /app/
+RUN uv sync --frozen --no-dev --no-install-project
 
-RUN uv sync --no-dev
+COPY src/ /app/
 
 ENTRYPOINT ["uv", "run"]
