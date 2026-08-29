@@ -83,6 +83,18 @@ def _fmt_kzt(value: float) -> str:
     return f"{value:,.0f}".replace(",", " ")
 
 
+def _fmt_kzt_short(value: float) -> str:
+    """Компактная подпись суммы для тесных мест: 1234567 -> '1.2 млн', 42800 -> '43 тыс'."""
+    v = abs(float(value))
+    if v >= 1_000_000:
+        return f"{value / 1_000_000:.1f} млн"
+    if v >= 10_000:
+        return f"{value / 1_000:.0f} тыс"
+    if v >= 1_000:
+        return f"{value / 1_000:.1f} тыс"
+    return f"{value:.0f}"
+
+
 def _period_label(date_from: dt.date, date_to: dt.date) -> str:
     d1 = pd.Timestamp(date_from).strftime("%d.%m.%Y")
     d2 = pd.Timestamp(date_to).strftime("%d.%m.%Y")
@@ -215,33 +227,54 @@ class ExpensesService(BaseService):
         return self._render(fig)
 
     def _monthly_trend_chart(self, monthly: pd.Series, category: Category) -> InputMediaPhoto:
-        """Столбцы трат по месяцам за последний год по одной категории:
-        подпись суммы над каждым столбцом, пунктир среднего по непустым месяцам."""
+        """Столбцы трат по месяцам за последний год по одной категории.
+
+        Линия тренда — скользящее среднее за 3 месяца, посчитанное только по
+        завершённым месяцам; текущий (неполный) месяц из линии исключён, его
+        столбец показан приглушённым."""
+        values = monthly.to_numpy(dtype=float)
+        n = len(monthly)
+        positions = list(range(n))
+        labels = [p.strftime("%m.%y") for p in monthly.index]
+        labels[-1] += "\n(неполн.)"
+
         total = float(monthly.sum())
         nonzero = monthly[monthly > 0]
         mean = float(nonzero.mean()) if not nonzero.empty else 0.0
-        labels = [p.strftime("%m.%y") for p in monthly.index]
-        positions = range(len(monthly))
 
-        fig, ax = plt.subplots(figsize=(8, 4.5))
-        bars = ax.bar(positions, monthly.to_numpy(), color=ChartColor.ACCENT.value, width=0.62)
-        ax.bar_label(bars, labels=[_fmt_kzt(v) if v else "" for v in monthly.to_numpy()],
-                     padding=3, fontsize=10, color=ChartColor.INK.value)
+        fig, ax = plt.subplots(figsize=(9, 5))
+        bars = ax.bar(positions, values, color=ChartColor.ACCENT.value, width=0.6)
+        bars[-1].set_alpha(0.3)
+
+        ax.bar_label(bars, labels=[_fmt_kzt_short(v) if v else "" for v in values],
+                     padding=4, fontsize=8, rotation=90, color=ChartColor.MUTED.value)
+
+        # скользящее среднее за 3 месяца по завершённым месяцам
+        completed = monthly.iloc[:-1]
+        if (completed > 0).any():
+            ma = completed.rolling(3, min_periods=1).mean().to_numpy(dtype=float)
+            ax.plot(positions[:-1], ma, color=ChartColor.MEAN_LINE.value, linewidth=2.4,
+                    marker="o", markersize=4, label="скользящее среднее, 3 мес")
 
         if mean:
-            ax.axhline(mean, color=ChartColor.MEAN_LINE.value, linestyle="--", linewidth=1.6,
+            ax.axhline(mean, color=ChartColor.MUTED.value, linestyle="--", linewidth=1.2,
                        label=f"среднее за месяц · {_fmt_kzt(mean)} ₸")
-            ax.legend(loc="upper left", frameon=False, fontsize=11)
 
-        emoji = f" {category.emoji}" if category.emoji else ""
-        ax.set_title(f"«{category.name}{emoji}» по месяцам\n"
-                     f"{labels[0]} – {labels[-1]} · всего {_fmt_kzt(total)} ₸")
-        peak = float(monthly.max()) if len(monthly) else 0.0
-        ax.set_ylim(0, peak * 1.2 if peak else 1)
-        ax.set_xticks(list(positions))
-        ax.set_xticklabels(labels)
+        if ax.get_legend_handles_labels()[0]:
+            ax.legend(loc="upper left", frameon=False, fontsize=10)
+
+        ax.set_title(f"«{category.name}» — траты по месяцам\n"
+                     f"{labels[0]} – {monthly.index[-1].strftime('%m.%y')} "
+                     f"· всего {_fmt_kzt(total)} ₸")
+        peak = float(values.max()) if n else 0.0
+        ax.set_ylim(0, peak * 1.32 if peak else 1)
+        ax.set_xticks(positions)
+        ax.set_xticklabels(labels, fontsize=9)
+        ax.tick_params(axis="x", rotation=45)
+        for tick in ax.get_xticklabels():
+            tick.set_horizontalalignment("right")
+        ax.margins(x=0.02)
         ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: _fmt_kzt(v)))
-        ax.tick_params(axis="x", rotation=0)
         ax.grid(axis="x", visible=False)
         for side in ("top", "right"):
             ax.spines[side].set_visible(False)
