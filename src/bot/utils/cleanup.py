@@ -30,12 +30,11 @@ async def _delete_later(bot: Bot, chat_id: int, message_ids: Iterable[int], dela
             logger.warning("Не удалось удалить сообщение %s в чате %s: %s", message_id, chat_id, error)
 
 
-def schedule_deletion(bot: Bot, chat_id: int, *message_ids: int | None, delay: int = DELETE_AFTER) -> None:
+def schedule_deletion(bot: Bot, chat_id: int, *message_ids: int, delay: int = DELETE_AFTER) -> None:
     """Запланировать удаление сообщений ``message_ids`` в чате ``chat_id`` через ``delay`` секунд."""
-    ids = [message_id for message_id in message_ids if message_id is not None]
-    if not ids:
+    if not message_ids:
         return
 
-    task = asyncio.create_task(_delete_later(bot, chat_id, ids, delay))
+    task = asyncio.create_task(_delete_later(bot, chat_id, message_ids, delay))
     _pending.add(task)
     task.add_done_callback(_pending.discard)
