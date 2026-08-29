@@ -27,6 +27,7 @@ from ..db.models import (
     Category,
 )
 from ..models.expenses import (
+    CategoryTrendStatistics,
     DailyStatistics,
     PeriodStatistics,
 )
@@ -212,6 +213,69 @@ class ExpensesService(BaseService):
             ax.spines[side].set_visible(False)
         ax.set_axisbelow(True)
         return self._render(fig)
+
+    def _monthly_trend_chart(self, monthly: pd.Series, category: Category) -> InputMediaPhoto:
+        """Столбцы трат по месяцам за последний год по одной категории:
+        подпись суммы над каждым столбцом, пунктир среднего по непустым месяцам."""
+        total = float(monthly.sum())
+        nonzero = monthly[monthly > 0]
+        mean = float(nonzero.mean()) if not nonzero.empty else 0.0
+        labels = [p.strftime("%m.%y") for p in monthly.index]
+        positions = range(len(monthly))
+
+        fig, ax = plt.subplots(figsize=(8, 4.5))
+        bars = ax.bar(positions, monthly.to_numpy(), color=ChartColor.ACCENT.value, width=0.62)
+        ax.bar_label(bars, labels=[_fmt_kzt(v) if v else "" for v in monthly.to_numpy()],
+                     padding=3, fontsize=10, color=ChartColor.INK.value)
+
+        if mean:
+            ax.axhline(mean, color=ChartColor.MEAN_LINE.value, linestyle="--", linewidth=1.6,
+                       label=f"среднее за месяц · {_fmt_kzt(mean)} ₸")
+            ax.legend(loc="upper left", frameon=False, fontsize=11)
+
+        emoji = f" {category.emoji}" if category.emoji else ""
+        ax.set_title(f"«{category.name}{emoji}» по месяцам\n"
+                     f"{labels[0]} – {labels[-1]} · всего {_fmt_kzt(total)} ₸")
+        peak = float(monthly.max()) if len(monthly) else 0.0
+        ax.set_ylim(0, peak * 1.2 if peak else 1)
+        ax.set_xticks(list(positions))
+        ax.set_xticklabels(labels)
+        ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: _fmt_kzt(v)))
+        ax.tick_params(axis="x", rotation=0)
+        ax.grid(axis="x", visible=False)
+        for side in ("top", "right"):
+            ax.spines[side].set_visible(False)
+        ax.set_axisbelow(True)
+        return self._render(fig)
+
+    def get_category_monthly_trend(self, user_id: int, category_id: int,
+                                   months: int = 12) -> CategoryTrendStatistics | None:
+        category = self.session.get(Category, category_id)
+        if category is None:
+            return None
+
+        start_period = pd.Period(localnow().date(), freq="M") - (months - 1)
+        today = localnow().date()
+        query = (self.session.query(Expense)
+                 .options(Load(Expense).load_only("id", "date", "amount"))
+                 .filter(Expense.date >= start_period.start_time.date())
+                 .filter(Expense.date <= today)
+                 .filter(Expense.is_expense.is_(True))
+                 .filter(Expense.user_id == user_id)
+                 .filter(Expense.category_id == category_id))
+
+        df = pd.read_sql(query.statement, self.session.bind, index_col="id")
+        if df.empty:
+            return None
+
+        df["amount"] = -df["amount"]
+        df["month"] = pd.to_datetime(df["date"]).dt.to_period("M")
+        monthly = df.groupby("month")["amount"].sum()
+        full_idx = pd.period_range(start_period, periods=months, freq="M")
+        monthly = monthly.reindex(full_idx, fill_value=0)
+
+        chart = self._monthly_trend_chart(monthly, category)
+        return CategoryTrendStatistics(charts=MediaGroup([chart]))
 
     def get_daily_statistics(self, user_id: int, day: dt.date) -> DailyStatistics | None:
         query = self._get_daily_stats_query(user_id, day)
