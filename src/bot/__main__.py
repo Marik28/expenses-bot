@@ -8,6 +8,7 @@ dotenv.load_dotenv()
 from .bot import bot, converter, dp
 from .middlewares.auth import AuthMiddleware
 from .scheduler import build_scheduler
+from .services.expenses import configure_matplotlib
 
 logger = logging.getLogger()
 logging.basicConfig(level="INFO")
@@ -19,6 +20,7 @@ scheduler = build_scheduler(bot)
 
 
 async def on_startup(dp):
+    configure_matplotlib()
     scheduler.start()
     logger.info("Scheduler started")
 

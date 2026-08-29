@@ -1,8 +1,14 @@
 import datetime as dt
 from decimal import Decimal
+from enum import Enum
 from io import BytesIO
 
+import matplotlib
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 import pandas as pd
+from matplotlib.figure import Figure
 from aiogram.types import (
     InputMediaPhoto,
     InputFile,
@@ -26,6 +32,60 @@ from ..models.expenses import (
 )
 from ..settings import settings
 from ..utils.datetime import localnow
+
+
+class ChartColor(str, Enum):
+    """Палитра графиков статистики, подобранная под чтение с телефона."""
+
+    ACCENT = "#2a78d6"
+    """Столбцы."""
+    MEAN_LINE = "#eb6834"
+    """Пунктир среднего."""
+    INK = "#1a1a19"
+    """Основной текст."""
+    MUTED = "#52514e"
+    """Подписи осей."""
+    EDGE = "#d5d4cf"
+    """Рамка осей."""
+    GRID = "#e9e8e3"
+    """Сетка."""
+
+
+def configure_matplotlib() -> None:
+    """Одноразовая настройка matplotlib для графиков статистики.
+
+    Дёргается при старте бота (``__main__.on_startup``): бэкенд без дисплея плюс
+    общая типографика — крупный шрифт, спокойная светлая сетка.
+    """
+    matplotlib.use("Agg")
+    plt.rcParams.update({
+        "figure.facecolor": "white",
+        "savefig.facecolor": "white",
+        "axes.facecolor": "white",
+        "font.size": 13,
+        "axes.titlesize": 14,
+        "axes.titleweight": "bold",
+        "axes.titlepad": 12,
+        "axes.labelcolor": ChartColor.MUTED.value,
+        "axes.edgecolor": ChartColor.EDGE.value,
+        "text.color": ChartColor.INK.value,
+        "xtick.color": ChartColor.MUTED.value,
+        "ytick.color": ChartColor.MUTED.value,
+        "axes.grid": True,
+        "grid.color": ChartColor.GRID.value,
+        "grid.linewidth": 0.8,
+    })
+
+
+def _fmt_kzt(value: float) -> str:
+    """1234567 -> '1 234 567' (пробел как разделитель разрядов)."""
+    return f"{value:,.0f}".replace(",", " ")
+
+
+def _period_label(date_from: dt.date, date_to: dt.date) -> str:
+    d1 = pd.Timestamp(date_from).strftime("%d.%m.%Y")
+    d2 = pd.Timestamp(date_to).strftime("%d.%m.%Y")
+    return d1 if d1 == d2 else f"{d1} – {d2}"
 
 
 class ExpensesService(BaseService):
@@ -58,16 +118,100 @@ class ExpensesService(BaseService):
                 .filter(Expense.user_id == user_id)
                 .filter(Category.id.not_in(settings.exclude_categories)))
 
+    @staticmethod
+    def _render(fig: Figure, caption: str | None = None,
+                parse_mode: str | None = None) -> InputMediaPhoto:
+        buffer = BytesIO()
+        fig.savefig(buffer, format="png", dpi=200, bbox_inches="tight")
+        plt.close(fig)
+        buffer.seek(0)
+        return InputMediaPhoto(InputFile(buffer), caption=caption, parse_mode=parse_mode)
+
     def _make_plot(self,
                    df: pd.DataFrame,
                    plot_type: str,
                    caption=None,
                    parse_mode=None,
                    **plot_kwargs) -> InputMediaPhoto:
-        buffer = BytesIO()
-        getattr(df.plot, plot_type)(**plot_kwargs).figure.savefig(buffer)
-        buffer.seek(0)
-        return InputMediaPhoto(InputFile(buffer), caption=caption, parse_mode=parse_mode)
+        fig, ax = plt.subplots(figsize=(7, 6))
+        getattr(df.plot, plot_type)(ax=ax, **plot_kwargs)
+        if plot_type != "pie":
+            ax.tick_params(axis="x", rotation=30)
+        return self._render(fig, caption, parse_mode)
+
+    def _category_chart(self, amounts: pd.Series, date_from: dt.date,
+                        date_to: dt.date) -> InputMediaPhoto:
+        """Горизонтальные столбцы по категориям: имена читаются без наклона,
+        рядом с каждым столбцом — сумма."""
+        amounts = amounts.sort_values()
+        total = float(amounts.sum())
+        # высота растёт с числом категорий, чтобы подписи не слипались
+        height = max(2.8, 0.52 * len(amounts) + 1.4)
+        fig, ax = plt.subplots(figsize=(7.5, height))
+
+        bars = ax.barh(amounts.index.astype(str), amounts.to_numpy(),
+                       color=ChartColor.ACCENT.value, height=0.62)
+        # каждый столбец подписан суммой — ось X с делениями не нужна
+        ax.bar_label(bars, labels=[f"  {_fmt_kzt(v)} ₸" for v in amounts.to_numpy()],
+                     padding=1, fontsize=12, color=ChartColor.INK.value)
+
+        ax.set_title(f"Расходы по категориям\n{_period_label(date_from, date_to)} "
+                     f"· всего {_fmt_kzt(total)} ₸")
+        ax.margins(x=0.24)
+        ax.xaxis.set_visible(False)
+        ax.grid(visible=False)
+        for side in ("top", "right", "bottom"):
+            ax.spines[side].set_visible(False)
+        ax.set_axisbelow(True)
+        return self._render(fig)
+
+    def _daily_trend_chart(self, amounts: pd.Series, date_from: dt.date,
+                           date_to: dt.date) -> InputMediaPhoto:
+        """Расходы во времени: непрерывная ось дат (промежутки без трат — нули),
+        пунктир среднего. Длинные периоды агрегируются по неделям, чтобы столбцы
+        не сливались на экране телефона."""
+        idx = pd.date_range(pd.Timestamp(date_from).normalize(),
+                            pd.Timestamp(date_to).normalize(), freq="D")
+        series = amounts.copy()
+        series.index = pd.to_datetime(series.index)
+        series = series.reindex(idx, fill_value=0)
+        total = float(series.sum())
+
+        days = len(idx)
+        if days > 92:
+            series = series.resample("W-MON", label="left").sum()
+            bar_width, unit, noun = 5.5, "в неделю", "по неделям"
+        else:
+            bar_width, unit, noun = 0.85, "в день", "по дням"
+
+        nonzero = series[series > 0]
+        mean = float(nonzero.mean()) if not nonzero.empty else 0.0
+
+        fig, ax = plt.subplots(figsize=(8, 4.5))
+        ax.bar(series.index, series.to_numpy(), color=ChartColor.ACCENT.value, width=bar_width)
+
+        if mean:
+            ax.axhline(mean, color=ChartColor.MEAN_LINE.value, linestyle="--", linewidth=1.6,
+                       label=f"среднее {unit} · {_fmt_kzt(mean)} ₸")
+            ax.legend(loc="upper left", frameon=False, fontsize=11)
+
+        ax.set_title(f"Расходы {noun}\n{_period_label(date_from, date_to)} "
+                     f"· всего {_fmt_kzt(total)} ₸")
+        peak = float(series.max()) if len(series) else 0.0
+        ax.set_ylim(0, peak * 1.18 if peak else 1)
+        ax.set_xlim(idx[0] - pd.Timedelta(days=1), idx[-1] + pd.Timedelta(days=1))
+        ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: _fmt_kzt(v)))
+        if days <= 16:
+            ax.xaxis.set_major_locator(mdates.DayLocator())
+        else:
+            ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=4, maxticks=8))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%d.%m"))
+        ax.tick_params(axis="x", rotation=0)
+        ax.grid(axis="x", visible=False)
+        for side in ("top", "right"):
+            ax.spines[side].set_visible(False)
+        ax.set_axisbelow(True)
+        return self._render(fig)
 
     def get_daily_statistics(self, user_id: int, day: dt.date) -> DailyStatistics | None:
         query = self._get_daily_stats_query(user_id, day)
@@ -116,13 +260,11 @@ class ExpensesService(BaseService):
         top_ten_expenses_df = df.sort_values(by=["amount"], ascending=False).head(10)
 
         daily_df = df.groupby(by="date").sum(numeric_only=True)
-
         cat_df = df.groupby(by="category").sum(numeric_only=True)
-        cat_pie = self._make_plot(cat_df, "pie", y="amount")
 
-        agg_df = df.groupby(by=["date", "category"]).sum()
-        bar = self._make_plot(agg_df.unstack(), "bar", stacked=True)
+        category_chart = self._category_chart(cat_df["amount"], date_from, date_to)
+        trend_chart = self._daily_trend_chart(daily_df["amount"], date_from, date_to)
 
         return PeriodStatistics(top_ten=top_ten_expenses_df.to_string(index=False),
                                 daily=daily_df.to_string(index=False),
-                                charts=MediaGroup([cat_pie, bar]))
+                                charts=MediaGroup([category_chart, trend_chart]))
