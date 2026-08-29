@@ -12,7 +12,6 @@ from aiogram_calendar import (
     SimpleCalendar,
     simple_cal_callback,
 )
-from dateutil import parser
 
 from .db.database import Session
 from .helpers import (
@@ -80,76 +79,86 @@ async def get_today_total_expenses(message: types.Message):
 
 @dp.message_handler(commands=["day"])
 async def choose_date(message: types.Message):
-    await message.answer("Введите дату, за которую хотите узнать статистику")
+    now = localnow()
     await GetDailyStatistics.waiting_for_date.set()
+    await message.answer(
+        "Выберите дату, за которую хотите узнать статистику:",
+        reply_markup=await SimpleCalendar().start_calendar(year=now.year, month=now.month),
+    )
 
 
-# TODO: придумать, как применить красивый календарь
-@dp.message_handler(state=GetDailyStatistics.waiting_for_date)
-async def get_daily_statistics(message: types.Message, state: FSMContext):
-    try:
-        date = parser.parse(message.text, dayfirst=True)
-    except ValueError:
-        await message.answer("Не удалось распарсить дату")
+@dp.callback_query_handler(simple_cal_callback.filter(), state=GetDailyStatistics.waiting_for_date)
+async def get_daily_statistics(query: types.CallbackQuery, state: FSMContext, callback_data: dict):
+    selected, date = await SimpleCalendar().process_selection(query, callback_data)
+    if not selected:
         return
 
+    await query.message.delete()
     await state.reset_state(with_data=False)
-    await bot.send_chat_action(message.chat.id, "typing")
+    await bot.send_chat_action(query.message.chat.id, "typing")
 
     service = ExpensesService(Session())
-    stats = service.get_daily_statistics(message.from_user.id, date)
+    stats = service.get_daily_statistics(query.from_user.id, date)
 
     if stats is None:
-        await message.answer(f"Нет статистики за {date.strftime('%d-%m-%y')}")
+        await query.message.answer(f"Нет статистики за {date.strftime('%d-%m-%y')}")
         return
 
-    await message.answer(code(stats.details), parse_mode=ParseMode.MARKDOWN_V2)
-    await bot.send_chat_action(message.chat.id, "upload_photo")
-    await bot.send_media_group(message.chat.id, stats.charts)
+    await query.message.answer(code(stats.details), parse_mode=ParseMode.MARKDOWN_V2)
+    await bot.send_chat_action(query.message.chat.id, "upload_photo")
+    await bot.send_media_group(query.message.chat.id, stats.charts)
 
 
 @dp.message_handler(commands=["period"])
 async def init_dates_entering(message: types.Message):
+    now = localnow()
     await GetPeriodStatistics.waiting_for_date_from.set()
-    await message.answer("С какого дня?")
+    await message.answer(
+        "С какого дня?",
+        reply_markup=await SimpleCalendar().start_calendar(year=now.year, month=now.month),
+    )
 
 
-@dp.message_handler(state=GetPeriodStatistics.waiting_for_date_from)
-async def parse_date_from(message: types.Message, state: FSMContext):
-    try:
-        date_from = parser.parse(message.text, dayfirst=True)
-    except ValueError:
-        await message.answer("Не удалось распарсить дату")
+@dp.callback_query_handler(simple_cal_callback.filter(), state=GetPeriodStatistics.waiting_for_date_from)
+async def parse_date_from(query: types.CallbackQuery, state: FSMContext, callback_data: dict):
+    selected, date_from = await SimpleCalendar().process_selection(query, callback_data)
+    if not selected:
         return
+
+    await query.message.delete()
 
     async with state.proxy() as data:
         data["date_from"] = date_from
 
+    now = localnow()
     await GetPeriodStatistics.waiting_for_date_to.set()
-    await message.answer("До какого дня?")
+    await query.message.answer(
+        "До какого дня?",
+        reply_markup=await SimpleCalendar().start_calendar(year=now.year, month=now.month),
+    )
 
 
-@dp.message_handler(state=GetPeriodStatistics.waiting_for_date_to)
-async def parse_date_to(message: types.Message, state: FSMContext):
-    try:
-        date_to = parser.parse(message.text, dayfirst=True)
-    except ValueError:
-        await message.answer("Не удалось распарсить дату")
+@dp.callback_query_handler(simple_cal_callback.filter(), state=GetPeriodStatistics.waiting_for_date_to)
+async def parse_date_to(query: types.CallbackQuery, state: FSMContext, callback_data: dict):
+    selected, date_to = await SimpleCalendar().process_selection(query, callback_data)
+    if not selected:
         return
+
+    await query.message.delete()
 
     async with state.proxy() as data:
         date_from = data["date_from"]
 
     await state.reset_state(with_data=False)
-    await bot.send_chat_action(message.chat.id, "upload_photo")
+    await bot.send_chat_action(query.message.chat.id, "upload_photo")
     service = ExpensesService(Session())
-    stats = service.get_period_statistics(message.from_user.id, date_from, date_to)
+    stats = service.get_period_statistics(query.from_user.id, date_from, date_to)
 
     if stats is None:
-        await message.answer("За данный период статистика не найдена")
+        await query.message.answer("За данный период статистика не найдена")
         return
 
-    await bot.send_media_group(message.chat.id, stats.charts)
+    await bot.send_media_group(query.message.chat.id, stats.charts)
 
 
 @dp.message_handler(commands=["cancel"], state="*")
