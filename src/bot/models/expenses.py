@@ -15,3 +15,8 @@ class PeriodStatistics:
     top_ten: str
     daily: str
     charts: MediaGroup
+
+
+@dataclass
+class CategoryTrendStatistics:
+    charts: MediaGroup

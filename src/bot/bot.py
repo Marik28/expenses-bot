@@ -16,7 +16,7 @@ from aiogram_calendar import (
 from .db.database import Session
 from .helpers import (
     add_expense_options_cb, categories_cb, get_add_expense_options, get_categories_buttons,
-    get_operation_types, operation_type_cb,
+    get_operation_types, operation_type_cb, stats_categories_cb,
 )
 from .services.categories import CategoriesService
 from .services.currency import CurrencyConverter
@@ -25,7 +25,7 @@ from .services.users import UsersService
 from .settings import settings
 from .states import (
     AddCategoryStates,
-    AddExpenseStates, GetDailyStatistics, GetPeriodStatistics,
+    AddExpenseStates, GetCategoryTrend, GetDailyStatistics, GetPeriodStatistics,
 )
 from .utils.datetime import localnow
 from .utils.parsing import BASE_CURRENCY, EXPENSE_REGEX, parse_expense
@@ -156,6 +156,33 @@ async def parse_date_to(query: types.CallbackQuery, state: FSMContext, callback_
 
     if stats is None:
         await query.message.answer("За данный период статистика не найдена")
+        return
+
+    await bot.send_media_group(query.message.chat.id, stats.charts)
+
+
+@dp.message_handler(commands=["trend"])
+async def choose_trend_category(message: types.Message):
+    service = CategoriesService(Session())
+    await GetCategoryTrend.waiting_for_category.set()
+    await message.answer(
+        "Выберите категорию — покажу тренд трат по месяцам за последний год:",
+        reply_markup=get_categories_buttons(service, cb=stats_categories_cb),
+    )
+
+
+@dp.callback_query_handler(stats_categories_cb.filter(), state=GetCategoryTrend.waiting_for_category)
+async def get_category_trend(query: types.CallbackQuery, state: FSMContext, callback_data: dict):
+    await query.answer("Считаю тренд")
+    await query.message.delete()
+    await state.finish()
+    await bot.send_chat_action(query.message.chat.id, "upload_photo")
+
+    service = ExpensesService(Session())
+    stats = service.get_category_monthly_trend(query.from_user.id, int(callback_data["id"]))
+
+    if stats is None:
+        await query.message.answer("За последний год трат по этой категории нет")
         return
 
     await bot.send_media_group(query.message.chat.id, stats.charts)

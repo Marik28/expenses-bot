@@ -19,3 +19,7 @@ class GetDailyStatistics(StatesGroup):
 class GetPeriodStatistics(StatesGroup):
     waiting_for_date_from = State()
     waiting_for_date_to = State()
+
+
+class GetCategoryTrend(StatesGroup):
+    waiting_for_category = State()

@@ -7,11 +7,13 @@ from aiogram.utils.callback_data import CallbackData
 from .services.categories import CategoriesService
 
 categories_cb = CallbackData("ctgr", "id")
+stats_categories_cb = CallbackData("statctgr", "id")
 add_expense_options_cb = CallbackData("exp", "action")
 operation_type_cb = CallbackData("op", "type")
 
 
-def get_categories_buttons(service: CategoriesService) -> InlineKeyboardMarkup:
+def get_categories_buttons(service: CategoriesService,
+                           cb: CallbackData = categories_cb) -> InlineKeyboardMarkup:
     keyboard = InlineKeyboardMarkup()
     categories = service.get_list()
     for category in categories:
@@ -20,7 +22,7 @@ def get_categories_buttons(service: CategoriesService) -> InlineKeyboardMarkup:
         keyboard.insert(
             InlineKeyboardButton(
                 text,
-                callback_data=categories_cb.new(id=category.id),
+                callback_data=cb.new(id=category.id),
             ),
         )
     return keyboard
