@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 _MAX_LOOKBACK_DAYS = 7
 """На сколько дней назад отступать в поисках рабочего дня (выходные/праздники), если на запрошенную дату курс ещё не опубликован."""
 
+_REQUEST_TIMEOUT = 10
 
 class CurrencyError(Exception):
     """Не удалось получить курс валюты (неизвестный код или нет данных)."""
@@ -67,6 +68,18 @@ class NationalBankRates(BaseModel):
         return value
 
 
+class _SuccessfulRatesFilter(hishel.BaseFilter):
+    """Разрешает кэшировать только успешные ответы Нацбанка с реальными курсами."""
+
+    def needs_body(self) -> bool:
+        return True
+
+    def apply(self, item: hishel.Response, body: bytes | None) -> bool:
+        if not 200 <= item.status_code < 300:
+            return False
+        return b"<item" in (body or b"")
+
+
 class CurrencyConverter:
     def __init__(self) -> None:
         self._redis = Redis.from_url(settings.redis_url)
@@ -75,8 +88,8 @@ class CurrencyConverter:
                 client=self._redis,
                 ttl=settings.currency_cache_ttl_days.total_seconds(),
             ),
-            policy=hishel.FilterPolicy(),
-            timeout=30,
+            policy=hishel.FilterPolicy(response_filters=[_SuccessfulRatesFilter()]),
+            timeout=_REQUEST_TIMEOUT,
         )
 
     async def aclose(self) -> None:

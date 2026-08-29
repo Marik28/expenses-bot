@@ -5,9 +5,10 @@ from decimal import Decimal
 BASE_CURRENCY = "KZT"
 
 EXPENSE_REGEX = re.compile(
-    r"^(?P<amount>\d{1,10}([,|.]\d*)?)"
+    r"^(?P<amount>\d{1,10}([,.]\d*)?)"
     r"(?P<cur>[A-Za-z]{3}(?=\s|$))?"
-    r"\s*(?P<comment>\S.*?)?\s*$"
+    r"\s*(?P<comment>\S.*?)?\s*$",
+    re.IGNORECASE | re.MULTILINE,
 )
 
 

@@ -74,7 +74,7 @@ docker compose up --build        # поднимает postgres:12 + redis:7 + б
 - **Источник курсов** — API Нацбанка РК: `GET {CURRENCY_API_URL}?fdate=DD.MM.YYYY` (XML на конкретную дату). Ответ парсится `xmltodict` → dict, затем валидируется pydantic-моделями `NationalBankRates` / `RateItem` (валидатор нормализует код, `_ensure_list` оборачивает единственный `<item>` в список; курс указан за `quant` единиц, `per_unit = rate / quant`).
 - **`convert(amount, currency, on_date=None)`** возвращает dataclass `Conversion(amount, rate)` — сумму в тенге и применённый курс за единицу. Для `BASE_CURRENCY` возвращает сумму как есть с `rate=1`.
 - **Выходные/праздники**: если на дату курса нет, отступает назад по дню до `_MAX_LOOKBACK_DAYS` (последний рабочий день).
-- **Кэш** — `hishel` поверх httpx с Redis-хранилищем (`AsyncRedisStorage`, TTL из `CURRENCY_CACHE_TTL_DAYS`). Нацбанк не отдаёт cache-заголовки, поэтому используется `hishel.FilterPolicy()` (кэшировать любой ответ по URL; каждая дата — свой ключ). Запросы асинхронные (`AsyncCacheClient`).
+- **Кэш** — `hishel` поверх httpx с Redis-хранилищем (`AsyncRedisStorage`, TTL из `CURRENCY_CACHE_TTL_DAYS`). Нацбанк не отдаёт cache-заголовки, поэтому используется `hishel.FilterPolicy` с `response_filters=[_SuccessfulRatesFilter()]`: кэшируется только успешный (2xx) ответ, где реально есть `<item>`. Ключ кэша — URL, т.е. каждая дата отдельно. Запросы асинхронные (`AsyncCacheClient`).
 - Инстанс `converter` в `bot.py` держит httpx-клиент и соединение Redis на всё время работы; закрывается в `on_shutdown` через `converter.aclose()`.
 
 docker-compose поднимает сервис `redis:7-alpine` (том `redis`, `depends_on` у бота).
