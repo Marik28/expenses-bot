@@ -27,6 +27,7 @@ from .states import (
     AddCategoryStates,
     AddExpenseStates, GetCategoryTrend, GetDailyStatistics, GetPeriodStatistics,
 )
+from .utils.cleanup import schedule_deletion
 from .utils.datetime import localnow
 from .utils.parsing import BASE_CURRENCY, EXPENSE_REGEX, parse_expense
 
@@ -112,6 +113,7 @@ async def get_daily_statistics(query: types.CallbackQuery, state: FSMContext, ca
 @dp.message_handler(commands=["period"])
 async def init_dates_entering(message: types.Message):
     now = localnow()
+    schedule_deletion(bot, message.chat.id, message.message_id)
     await GetPeriodStatistics.waiting_for_date_from.set()
     await message.answer(
         "С какого дня?",
@@ -155,15 +157,18 @@ async def parse_date_to(query: types.CallbackQuery, state: FSMContext, callback_
     stats = service.get_period_statistics(query.from_user.id, date_from, date_to)
 
     if stats is None:
-        await query.message.answer("За данный период статистика не найдена")
+        warning = await query.message.answer("За данный период статистика не найдена")
+        schedule_deletion(bot, warning.chat.id, warning.message_id)
         return
 
-    await bot.send_media_group(query.message.chat.id, stats.charts)
+    messages = await bot.send_media_group(query.message.chat.id, stats.charts)
+    schedule_deletion(bot, query.message.chat.id, *(m.message_id for m in messages))
 
 
 @dp.message_handler(commands=["trend"])
 async def choose_trend_category(message: types.Message):
     service = CategoriesService(Session())
+    schedule_deletion(bot, message.chat.id, message.message_id)
     await GetCategoryTrend.waiting_for_category.set()
     await message.answer(
         "Выберите категорию — покажу тренд трат по месяцам за последний год:",
@@ -182,10 +187,12 @@ async def get_category_trend(query: types.CallbackQuery, state: FSMContext, call
     stats = service.get_category_monthly_trend(query.from_user.id, int(callback_data["id"]))
 
     if stats is None:
-        await query.message.answer("За последний год трат по этой категории нет")
+        warning = await query.message.answer("За последний год трат по этой категории нет")
+        schedule_deletion(bot, warning.chat.id, warning.message_id)
         return
 
-    await bot.send_media_group(query.message.chat.id, stats.charts)
+    messages = await bot.send_media_group(query.message.chat.id, stats.charts)
+    schedule_deletion(bot, query.message.chat.id, *(m.message_id for m in messages))
 
 
 @dp.message_handler(commands=["cancel"], state="*")
