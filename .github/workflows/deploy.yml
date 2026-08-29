@@ -1,0 +1,63 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Ветка, тег или SHA для деплоя"
+        required: false
+        default: main
+
+# два деплоя одновременно на один сервер не запускаем
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          command_timeout: 20m
+          script: |
+            set -eu
+            cd "${{ secrets.DEPLOY_PATH }}"
+
+            echo "==> 1. Обновляем код до ${{ inputs.ref }}"
+            git fetch --prune origin
+            git reset --hard "origin/${{ inputs.ref }}"
+
+            echo "==> 2. Пишем .env из секрета ENV_FILE (полная перезапись)"
+            umask 077
+            cat > .env <<'ENV_EOF'
+            ${{ secrets.ENV_FILE }}
+            ENV_EOF
+
+            echo "==> 3. Собираем образы"
+            docker compose build
+
+            echo "==> 4. Поднимаем БД и Redis, ждём готовности Postgres"
+            docker compose up -d db redis
+            for i in $(seq 1 20); do
+              docker compose exec -T db pg_isready >/dev/null 2>&1 && break
+              echo "   Postgres ещё не готов ($i)..."
+              sleep 2
+            done
+
+            echo "==> 5. Применяем миграции"
+            docker compose run --rm bot alembic upgrade head
+
+            echo "==> 6. Перезапускаем бота на новом образе"
+            docker compose up -d bot
+
+            echo "==> 7. Чистим старые образы"
+            docker image prune -f
+
+            echo "==> Готово. Статус:"
+            docker compose ps
