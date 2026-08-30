@@ -6,6 +6,7 @@ from aiogram.utils import executor
 
 dotenv.load_dotenv()
 from .bot import bot, converter, dp
+from .commands import set_bot_commands
 from .middlewares.auth import AuthMiddleware
 from .scheduler import build_scheduler
 from .services.expenses import configure_matplotlib
@@ -21,6 +22,8 @@ scheduler = build_scheduler(bot)
 
 async def on_startup(dp):
     configure_matplotlib()
+    await set_bot_commands(bot)
+    logger.info("Bot commands registered")
     scheduler.start()
     logger.info("Scheduler started")
 
