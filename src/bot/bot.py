@@ -1,3 +1,5 @@
+import datetime as dt
+
 import sqlalchemy.exc
 from aiogram import types
 from aiogram.bot import Bot
@@ -7,7 +9,7 @@ from aiogram.dispatcher import (
     FSMContext,
 )
 from aiogram.types import ParseMode
-from aiogram.utils.markdown import (code, spoiler)
+from aiogram.utils.markdown import (code, pre, spoiler)
 from aiogram_calendar import (
     SimpleCalendar,
     simple_cal_callback,
@@ -15,8 +17,9 @@ from aiogram_calendar import (
 
 from .db.database import Session
 from .helpers import (
-    add_expense_options_cb, categories_cb, get_add_expense_options, get_categories_buttons,
-    get_operation_types, operation_type_cb, stats_categories_cb,
+    add_expense_options_cb, categories_cb, category_month_cb, get_add_expense_options,
+    get_categories_buttons, get_months_buttons, get_operation_types, operation_type_cb,
+    stats_categories_cb,
 )
 from .services.categories import CategoriesService
 from .services.currency import CurrencyConverter
@@ -25,7 +28,7 @@ from .services.users import UsersService
 from .settings import settings
 from .states import (
     AddCategoryStates,
-    AddExpenseStates, GetCategoryTrend, GetDailyStatistics, GetPeriodStatistics,
+    AddExpenseStates, GetCategoryMonth, GetCategoryTrend, GetDailyStatistics, GetPeriodStatistics,
 )
 from .utils.cleanup import schedule_deletion
 from .utils.datetime import localnow
@@ -193,6 +196,52 @@ async def get_category_trend(query: types.CallbackQuery, state: FSMContext, call
 
     messages = await bot.send_media_group(query.message.chat.id, stats.charts)
     schedule_deletion(bot, query.message.chat.id, *(m.message_id for m in messages))
+
+
+@dp.message_handler(commands=["category"])
+async def choose_category_for_month(message: types.Message):
+    service = CategoriesService(Session())
+    schedule_deletion(bot, message.chat.id, message.message_id)
+    await GetCategoryMonth.waiting_for_category.set()
+    await message.answer(
+        "Выберите категорию:",
+        reply_markup=get_categories_buttons(service, cb=stats_categories_cb),
+    )
+
+
+@dp.callback_query_handler(stats_categories_cb.filter(), state=GetCategoryMonth.waiting_for_category)
+async def choose_month_for_category(query: types.CallbackQuery, state: FSMContext, callback_data: dict):
+    await query.answer("Выберите месяц")
+    async with state.proxy() as data:
+        data["category_id"] = int(callback_data["id"])
+
+    await GetCategoryMonth.waiting_for_month.set()
+    await query.message.edit_text("Выберите месяц:", reply_markup=get_months_buttons())
+
+
+@dp.callback_query_handler(category_month_cb.filter(), state=GetCategoryMonth.waiting_for_month)
+async def get_category_month_statistics(query: types.CallbackQuery, state: FSMContext, callback_data: dict):
+    await query.answer("Считаю")
+    await query.message.delete()
+
+    async with state.proxy() as data:
+        category_id = data["category_id"]
+
+    await state.finish()
+    await bot.send_chat_action(query.message.chat.id, "upload_photo")
+
+    month = dt.date(int(callback_data["year"]), int(callback_data["month"]), 1)
+    service = ExpensesService(Session())
+    stats = service.get_category_month_statistics(query.from_user.id, category_id, month)
+
+    if stats is None:
+        warning = await query.message.answer("За этот месяц трат по категории нет")
+        schedule_deletion(bot, warning.chat.id, warning.message_id)
+        return
+
+    details = await query.message.answer(pre(stats.details), parse_mode=ParseMode.MARKDOWN_V2)
+    charts = await bot.send_media_group(query.message.chat.id, stats.charts)
+    schedule_deletion(bot, query.message.chat.id, details.message_id, *(m.message_id for m in charts))
 
 
 @dp.message_handler(commands=["cancel"], state="*")

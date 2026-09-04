@@ -1,3 +1,5 @@
+import datetime as dt
+
 from aiogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
@@ -5,9 +7,11 @@ from aiogram.types import (
 from aiogram.utils.callback_data import CallbackData
 
 from .services.categories import CategoriesService
+from .utils.datetime import localnow, month_label_short
 
 categories_cb = CallbackData("ctgr", "id")
 stats_categories_cb = CallbackData("statctgr", "id")
+category_month_cb = CallbackData("catmonth", "year", "month")
 add_expense_options_cb = CallbackData("exp", "action")
 operation_type_cb = CallbackData("op", "type")
 
@@ -23,6 +27,24 @@ def get_categories_buttons(service: CategoriesService,
             InlineKeyboardButton(
                 text,
                 callback_data=cb.new(id=category.id),
+            ),
+        )
+    return keyboard
+
+
+def get_months_buttons(count: int = 12,
+                       cb: CallbackData = category_month_cb) -> InlineKeyboardMarkup:
+    """Кнопки последних ``count`` месяцев (текущий — первым)."""
+    keyboard = InlineKeyboardMarkup(row_width=3)
+    now = localnow()
+    latest = now.year * 12 + (now.month - 1)
+    for idx in range(latest, latest - count, -1):
+        year, month = divmod(idx, 12)
+        day = dt.date(year, month + 1, 1)
+        keyboard.insert(
+            InlineKeyboardButton(
+                month_label_short(day),
+                callback_data=cb.new(year=day.year, month=day.month),
             ),
         )
     return keyboard

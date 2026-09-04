@@ -23,3 +23,8 @@ class GetPeriodStatistics(StatesGroup):
 
 class GetCategoryTrend(StatesGroup):
     waiting_for_category = State()
+
+
+class GetCategoryMonth(StatesGroup):
+    waiting_for_category = State()
+    waiting_for_month = State()

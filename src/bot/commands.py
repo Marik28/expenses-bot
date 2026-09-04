@@ -8,6 +8,7 @@ BOT_COMMANDS = [
     types.BotCommand("day", "Статистика за выбранный день"),
     types.BotCommand("period", "Статистика за период"),
     types.BotCommand("trend", "Тренд трат по категории за год"),
+    types.BotCommand("category", "Траты по категории за месяц"),
     types.BotCommand("add_category", "Добавить категорию"),
     types.BotCommand("cancel", "Отменить текущее действие"),
 ]

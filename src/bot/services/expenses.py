@@ -27,12 +27,13 @@ from ..db.models import (
     Category,
 )
 from ..models.expenses import (
+    CategoryMonthStatistics,
     CategoryTrendStatistics,
     DailyStatistics,
     PeriodStatistics,
 )
 from ..settings import settings
-from ..utils.datetime import localnow
+from ..utils.datetime import localnow, month_bounds, month_label
 
 
 class ChartColor(str, Enum):
@@ -152,13 +153,11 @@ class ExpensesService(BaseService):
             ax.tick_params(axis="x", rotation=30)
         return self._render(fig, caption, parse_mode)
 
-    def _category_chart(self, amounts: pd.Series, date_from: dt.date,
-                        date_to: dt.date) -> InputMediaPhoto:
-        """Горизонтальные столбцы по категориям: имена читаются без наклона,
-        рядом с каждым столбцом — сумма."""
+    def _barh_chart(self, amounts: pd.Series, title: str) -> InputMediaPhoto:
+        """Горизонтальные столбцы: подписи читаются без наклона, рядом с каждым
+        столбцом — сумма. ``amounts.index`` — готовые подписи."""
         amounts = amounts.sort_values()
-        total = float(amounts.sum())
-        # высота растёт с числом категорий, чтобы подписи не слипались
+        # высота растёт с числом столбцов, чтобы подписи не слипались
         height = max(2.8, 0.52 * len(amounts) + 1.4)
         fig, ax = plt.subplots(figsize=(7.5, height))
 
@@ -168,8 +167,7 @@ class ExpensesService(BaseService):
         ax.bar_label(bars, labels=[f"  {_fmt_kzt(v)} ₸" for v in amounts.to_numpy()],
                      padding=1, fontsize=12, color=ChartColor.INK.value)
 
-        ax.set_title(f"Расходы по категориям\n{_period_label(date_from, date_to)} "
-                     f"· всего {_fmt_kzt(total)} ₸")
+        ax.set_title(title)
         ax.margins(x=0.24)
         ax.xaxis.set_visible(False)
         ax.grid(visible=False)
@@ -177,6 +175,13 @@ class ExpensesService(BaseService):
             ax.spines[side].set_visible(False)
         ax.set_axisbelow(True)
         return self._render(fig)
+
+    def _category_chart(self, amounts: pd.Series, date_from: dt.date,
+                        date_to: dt.date) -> InputMediaPhoto:
+        """Горизонтальные столбцы по категориям за период."""
+        title = (f"Расходы по категориям\n{_period_label(date_from, date_to)} "
+                 f"· всего {_fmt_kzt(float(amounts.sum()))} ₸")
+        return self._barh_chart(amounts, title)
 
     def _daily_trend_chart(self, amounts: pd.Series, date_from: dt.date,
                            date_to: dt.date) -> InputMediaPhoto:
@@ -309,6 +314,55 @@ class ExpensesService(BaseService):
 
         chart = self._monthly_trend_chart(monthly, category)
         return CategoryTrendStatistics(charts=MediaGroup([chart]))
+
+    def get_category_month_statistics(self, user_id: int, category_id: int,
+                                      month: dt.date) -> CategoryMonthStatistics | None:
+        category = self.session.get(Category, category_id)
+        if category is None:
+            return None
+
+        date_from, date_to = month_bounds(month)
+        query = (self.session.query(Expense)
+                 .options(Load(Expense).load_only("id", "date", "amount", "comment"))
+                 .filter(Expense.date.between(date_from, date_to))
+                 .filter(Expense.is_expense.is_(True))
+                 .filter(Expense.user_id == user_id)
+                 .filter(Expense.category_id == category_id))
+
+        df = pd.read_sql(query.statement, self.session.bind, index_col="id")
+        if df.empty:
+            return None
+
+        df["amount"] = -df["amount"]
+        df["date"] = pd.to_datetime(df["date"])
+        title = month_label(month)
+        total = float(df["amount"].sum())
+
+        # график 1 — траты по дням месяца
+        daily = df.groupby(df["date"].dt.normalize())["amount"].sum()
+        charts = [self._daily_trend_chart(daily, date_from, date_to)]
+
+        # график 2 — разбивка по комментариям, если их несколько
+        by_comment = (df.assign(comment=df["comment"].fillna("—"))
+                      .groupby("comment")["amount"].sum())
+        if len(by_comment) >= 2:
+            by_comment.index = [c if len(c) <= 23 else c[:22] + "…" for c in by_comment.index]
+            comment_title = (f"«{category.name}» — по комментариям\n"
+                             f"{title} · всего {_fmt_kzt(total)} ₸")
+            charts.append(self._barh_chart(by_comment, comment_title))
+
+        # текстовый список трат
+        listing = df[["date", "amount", "comment"]].copy()
+        listing["date"] = listing["date"].dt.strftime("%d.%m")
+        listing["comment"] = listing["comment"].fillna("—")
+        listing.sort_values(by="amount", ascending=False, inplace=True)
+        listing.rename(columns={"date": "дата", "amount": "сумма", "comment": "комментарий"},
+                       inplace=True)
+        listing.index = range(1, len(listing) + 1)
+        listing.loc["Итого"] = ["", listing["сумма"].sum(), ""]
+        details = f"«{category.name}» — {title}\n\n{listing.to_string()}"
+
+        return CategoryMonthStatistics(details=details, charts=MediaGroup(charts))
 
     def get_daily_statistics(self, user_id: int, day: dt.date) -> DailyStatistics | None:
         query = self._get_daily_stats_query(user_id, day)

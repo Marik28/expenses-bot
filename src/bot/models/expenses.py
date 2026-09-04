@@ -20,3 +20,9 @@ class PeriodStatistics:
 @dataclass
 class CategoryTrendStatistics:
     charts: MediaGroup
+
+
+@dataclass
+class CategoryMonthStatistics:
+    details: str
+    charts: MediaGroup
